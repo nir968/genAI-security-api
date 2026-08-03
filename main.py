@@ -69,3 +69,16 @@ def analyze_prompt(request: PromptRequest):
 @app.get("/")
 def read_root():
     return {"status": "API is up and running!"}
+
+
+    # להוסיף בתוך main.py של ה-FastAPI
+@app.get("/stats")
+def get_security_stats():
+    # בעתיד נשמור את המספרים האלו בבסיס נתונים. 
+    # כרגע נחזיר JSON פשוט שמדמה נתונים "חיים".
+    return {
+        "total_requests": 3450,
+        "blocked_injections": 42,
+        "data_leaks_prevented": 11,
+        "status": "Active & Secure"
+    }

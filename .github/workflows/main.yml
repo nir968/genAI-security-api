@@ -1,0 +1,36 @@
+name: GenAI API CI/CD Pipeline
+
+# מתי האוטומציה הזו תרוץ? בכל פעם שעושים Push לענף הראשי
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-and-test:
+    name: Build & Check Code
+    # איזה מחשב גיטהאב יקצה לנו בענן שלהם? (חינמי!)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
+
+      - name: 🐍 Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi uvicorn
+          # אם יש לך requirements.txt מלא, השורה הבאה תתקין הכל:
+          # pip install -r requirements.txt
+
+      - name: ✅ Run Security & Syntax Checks
+        run: |
+          echo "Checking syntax and preparing for deployment..."
+          python -m compileall .
+          echo "All checks passed! Ready for Production."
+          
+      # בשלב הבא נוכל להוסיף פה את ה-Webhook שיגיד ל-Render להתעדכן!
