@@ -34,7 +34,7 @@ jobs:
           echo "All checks passed! Ready for Production."
 
 
-          - name: 🚀 Trigger Render Deployment
+      - name: 🚀 Trigger Render Deployment
         run: |
           curl "${{ secrets.RENDER_DEPLOY_HOOK }}"
           echo "Deployment triggered successfully!"
