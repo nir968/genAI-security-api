@@ -32,5 +32,10 @@ jobs:
           echo "Checking syntax and preparing for deployment..."
           python -m compileall .
           echo "All checks passed! Ready for Production."
+
+
+          - name: 🚀 Trigger Render Deployment
+        run: |
+          curl "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          echo "Deployment triggered successfully!"
           
-      # בשלב הבא נוכל להוסיף פה את ה-Webhook שיגיד ל-Render להתעדכן!
