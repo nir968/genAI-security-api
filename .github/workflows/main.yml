@@ -1,6 +1,6 @@
 name: GenAI API CI/CD Pipeline
 
-# מתי האוטומציה הזו תרוץ? בכל פעם שעושים Push לענף הראשי
+# runs everytime a push is made to the main or master branch
 on:
   push:
     branches: [ "main", "master" ]
@@ -8,7 +8,7 @@ on:
 jobs:
   build-and-test:
     name: Build & Check Code
-    # איזה מחשב גיטהאב יקצה לנו בענן שלהם? (חינמי!)
+
     runs-on: ubuntu-latest
 
     steps:
