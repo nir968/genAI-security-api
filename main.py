@@ -57,6 +57,7 @@ def save_log_to_db(
 
 
 # Endpoint for receiving prompts, inspection, and direct synchronous logging@app.post("/inspect")
+@app.post("/inspect")
 def inspect_prompt(request: PromptRequest):
 
   prompt_text = request.prompt.lower()
