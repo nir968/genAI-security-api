@@ -57,7 +57,8 @@ def save_log_to_db(
 
 # נקודת קצה לקבלת פרומפט, בדיקה, ושמירה אסינכרונית ברקע
 @app.post("/inspect")
-async def inspect_prompt(request: PromptRequest, background_tasks: BackgroundTasks):
+async def inspect_prompt(request: PromptRequest):
+#                                       inspect_prompt(request: PromptRequest,background_tasks: BackgroundTasks)
 
   prompt_text = request.prompt.lower()
   is_blocked = False
@@ -68,15 +69,13 @@ async def inspect_prompt(request: PromptRequest, background_tasks: BackgroundTas
     is_blocked = True
     risk_score = 95
     threat_type = "Prompt Injection"
+
   elif "credit card" in prompt_text or "password" in prompt_text:
     is_blocked = True
     risk_score = 80
     threat_type = "DLP Violation"
 
-  # שמירת הנתונים ל-SQL ברקע מבלי לעכב את התשובה למשתמש
-  background_tasks.add_task(
-      save_log_to_db, request.prompt, is_blocked, risk_score, threat_type
-  )
+  save_log_to_db(request.prompt, is_blocked, risk_score, threat_type)
 
   if is_blocked:
     raise HTTPException(
