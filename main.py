@@ -1,5 +1,5 @@
 #backend
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine
@@ -65,12 +65,15 @@ def inspect_prompt(request: PromptRequest):
   risk_score = 10
   threat_type = "Safe"
 
-  if "ignore previous" in prompt_text or "system prompt" in prompt_text:
+  injection_keywords = ["previous instructions", "system prompt", "developer mode", "jailbreak", "override"]
+  dlp_keywords = ["credit card", "cc number", "password", "cvv", "api key", "secret"]
+
+  if "ignore previous" in prompt_text or "system prompt" in prompt_text or any(word in prompt_text for word in injection_keywords):
     is_blocked = True
     risk_score = 95
     threat_type = "Prompt Injection"
 
-  elif "credit card" in prompt_text or "password" in prompt_text:
+  elif "credit card" in prompt_text or "password" in prompt_text or any(word in prompt_text for word in dlp_keywords):
     is_blocked = True
     risk_score = 80
     threat_type = "DLP Violation"
@@ -117,6 +120,49 @@ def get_stats():
         "data_leaks_prevented": dlp_prevented,
         "status": "Active & Secure",
     }
+  finally:
+    db.close()
+
+
+#  History endpoint powering the dashboard's activity chart
+@app.get("/history")
+def get_history(hours: int = 24):
+  if hours < 1 or hours > 720:
+    raise HTTPException(
+        status_code=400, detail="hours must be between 1 and 720"
+    )
+
+  db = SessionLocal()
+  try:
+    # timestamps are written with datetime.utcnow(), so compare against UTC
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+    rows = (
+        db.query(RequestLogDB)
+        .filter(RequestLogDB.timestamp >= cutoff)
+        .order_by(RequestLogDB.timestamp)
+        .all()
+    )
+
+    records = []
+    for row in rows:
+      if row.timestamp is None:
+        continue
+
+      # The column is naive UTC. Without an explicit "Z" the browser would
+      # read the ISO string as local time and shift every chart bucket by
+      # the viewer's UTC offset.
+      stamp = row.timestamp.replace(tzinfo=timezone.utc)
+
+      records.append({
+          "timestamp": stamp.isoformat().replace("+00:00", "Z"),
+          "blocked": bool(row.is_blocked),
+          "threat_type": row.threat_type,
+          "risk_score": row.risk_score,
+          "prompt": row.prompt,
+      })
+
+    return {"records": records}
   finally:
     db.close()
 
