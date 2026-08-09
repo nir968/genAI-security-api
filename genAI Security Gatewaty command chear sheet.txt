@@ -1,0 +1,51 @@
+========================================
+GENAI SECURITY GATEWAY - COMMAND CHEAT SHEET
+========================================
+
+--- 1. GIT WORKFLOW ---
+
+git status                                   # Check modified files status
+git add .                                    # Stage all changes
+git commit -m "your commit message"          # Commit changes with a message
+git push                                     # Push commits to remote repository
+
+# Additional helpful Git commands:
+git pull                                     # Fetch and merge changes from the remote repository
+git clone <repository_url>                   # Clone a remote repository onto your local machine
+git branch                                   # List all local branches in the repository
+git checkout -b <branch_name>                # Create a new branch and switch to it immediately
+git log --oneline                            # View a concise, single-line history of recent commits
+git diff                                     # View uncommitted changes in your working directory
+
+--- 2. FRONTEND REFRESH (AWS) ---
+
+cd ~/genAI-security-web                                      # Navigate to the frontend project directory on the server
+git pull                                                     # Download the latest code updates from GitHub
+sudo docker stop genai-web-container                         # Stop the currently running old frontend container
+sudo docker rm genai-web-container                           # Delete the stopped old container to free up the name/space
+sudo docker build --no-cache -t genai-web-image .            # Build a brand new Docker image from scratch without using cache
+sudo docker run -d -p 5001:5001 --name genai-web-container --network app-net genai-web-image
+
+############################################################################################
+# Explanation of docker run:                                                               #
+# -d: Run container in the background                                                      #
+# -p 5001:5001: Map port 5001 on the server to port 5001 inside the container              #
+# --name genai-web-container: Assign a custom name to the container                        #
+# --network app-net: Connect the container to our custom internal Docker network           #
+# genai-web-image: The image name to build/run from                                        #
+############################################################################################
+
+
+--- 3. BACKEND REFRESH (AWS & DB Reset) ---
+
+cd ~/genAI-security-api                      
+git pull                                     
+rm -f security_gateway.db                    # Reset database to zero
+sudo docker rm -f genai-api-container
+sudo docker build --no-cache -t genai-api-image .
+sudo docker run -d -p 8000:8000 --name genai-api-container --network app-net genai-api-image
+
+--- 4. DOCKER MONITORING & LOGS ---
+sudo docker ps                               # List active containers
+sudo docker logs genai-api-container         # Check backend container logs
+sudo docker logs genai-web-container         # Check frontend container logs

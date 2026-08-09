@@ -38,7 +38,7 @@ class PromptRequest(BaseModel):
   prompt: str
 
 
-# פונקציית עזר לשמירה ברקע (Background Task) כדי לא לעכב את המשתמש
+# Helper function to save request logs directly to the database
 def save_log_to_db(
     prompt: str, is_blocked: bool, risk_score: int, threat_type: str
 ):
@@ -55,10 +55,9 @@ def save_log_to_db(
   finally:
     db.close()
 
-# נקודת קצה לקבלת פרומפט, בדיקה, ושמירה אסינכרונית ברקע
-@app.post("/inspect")
-async def inspect_prompt(request: PromptRequest):
-#                                       inspect_prompt(request: PromptRequest,background_tasks: BackgroundTasks)
+
+# Endpoint for receiving prompts, inspection, and direct synchronous logging@app.post("/inspect")
+def inspect_prompt(request: PromptRequest):
 
   prompt_text = request.prompt.lower()
   is_blocked = False
@@ -93,7 +92,7 @@ async def inspect_prompt(request: PromptRequest):
   }
 
 
-# נקודת קצה לסטטיסטיקות שמזינה את ה-Dashboard
+#  Statistics endpoint for the dashboard
 @app.get("/stats")
 def get_stats():
   db = SessionLocal()
