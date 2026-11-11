@@ -4,6 +4,21 @@ services:
     environment:
       # SQLite file lives on the named volume so data survives restarts
       DATABASE_URL: sqlite:////data/security_gateway.db
+      # DLP policy: defaults to the file bundled in the image
+      DLP_POLICY_PATH: ${DLP_POLICY_PATH:-/app/dlp/policy.yaml}
+      MAX_PROMPT_CHARS: ${MAX_PROMPT_CHARS:-20000}
+      # LLM used by POST /chat. The deterministic mock is the default.
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      # --- Example: a local Ollama running on the host machine ---
+      # (set these in your shell or in a .env file next to this compose file)
+      #   LLM_PROVIDER=openai_compatible
+      #   LLM_BASE_URL=http://host.docker.internal:11434/v1
+      #   LLM_MODEL=llama3.2
+      # On Linux, also add to this service:
+      #   extra_hosts: ["host.docker.internal:host-gateway"]
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
     volumes:
       - gateway-data:/data
     ports:
