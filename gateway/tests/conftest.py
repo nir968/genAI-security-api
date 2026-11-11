@@ -23,10 +23,15 @@ def fresh_dlp_policy():
 
 
 @pytest.fixture
-def db_engine(tmp_path, monkeypatch):
+def db_path(tmp_path):
+    return tmp_path / "test.db"
+
+
+@pytest.fixture
+def db_engine(db_path, monkeypatch):
     """A fresh SQLite database file in tmp_path for every test."""
     engine = create_engine(
-        f"sqlite:///{tmp_path / 'test.db'}",
+        f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
