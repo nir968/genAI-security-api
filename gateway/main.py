@@ -1,16 +1,19 @@
 #backend
 import io
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
-# 1. create a SQLite database connection and session
+from detection import analyze_prompt
+
+# 1. create a SQLite database connection and session factory
 SQLALCHEMY_DATABASE_URL = os.environ.get(
     "DATABASE_URL", "sqlite:///./security_gateway.db"
 )
@@ -23,35 +26,50 @@ Base = declarative_base()
 
 # 2.  organize the database table structure for request logs
 class RequestLogDB(Base):
-  __tablename__ = "request_logs"
+    __tablename__ = "request_logs"
 
-  id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-  prompt = Column(String, nullable=False)
-  is_blocked = Column(Boolean, default=False)
-  risk_score = Column(Integer, default=0)
-  threat_type = Column(String, default="None")
-  # TODO: datetime.utcnow() is deprecated; switching to timezone-aware
-  # datetimes changes stored data, so it is deliberately left as is for now.
-  timestamp = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    prompt = Column(String, nullable=False)
+    is_blocked = Column(Boolean, default=False)
+    risk_score = Column(Integer, default=0)
+    threat_type = Column(String, default="None")
+    # TODO: datetime.utcnow() is deprecated; switching to timezone-aware
+    # datetimes changes stored data, so it is deliberately left as is for now.
+    timestamp = Column(DateTime, default=datetime.utcnow)
 
 
-# create the database tables if they don't exist
-Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # create the database tables if they don't exist (on startup, not on import)
+    Base.metadata.create_all(bind=engine)
+    yield
 
-app = FastAPI(title="GenAI Security Gateway")
+
+app = FastAPI(title="GenAI Security Gateway", lifespan=lifespan)
+
+
+def get_db():
+    """Yield a database session for the duration of a request."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 # data model for the request body
 class PromptRequest(BaseModel):
-  prompt: str
+    prompt: str
 
 
-# Helper function to save request logs directly to the database
+# Helper function to save request logs using the given session
 def save_log_to_db(
-    prompt: str, is_blocked: bool, risk_score: int, threat_type: str
+    db: Session,
+    prompt: str,
+    is_blocked: bool,
+    risk_score: int,
+    threat_type: str,
 ):
-  db = SessionLocal()
-  try:
     db_log = RequestLogDB(
         prompt=prompt,
         is_blocked=is_blocked,
@@ -60,61 +78,47 @@ def save_log_to_db(
     )
     db.add(db_log)
     db.commit()
-  finally:
-    db.close()
 
 
 # Liveness probe (used by the Docker healthcheck); does not touch the database
 @app.get("/health")
 def health():
-  return {"status": "ok"}
+    return {"status": "ok"}
 
 
 # Endpoint for receiving prompts, inspection, and direct synchronous logging
 @app.post("/inspect")
-def inspect_prompt(request: PromptRequest):
+def inspect_prompt(request: PromptRequest, db: Session = Depends(get_db)):
+    result = analyze_prompt(request.prompt)
 
-  prompt_text = request.prompt.lower()
-  is_blocked = False
-  risk_score = 10
-  threat_type = "Safe"
-
-  injection_keywords = ["previous instructions", "system prompt", "developer mode", "jailbreak", "override"]
-  dlp_keywords = ["credit card", "cc number", "password", "cvv", "api key", "secret"]
-
-  if "ignore previous" in prompt_text or "system prompt" in prompt_text or any(word in prompt_text for word in injection_keywords):
-    is_blocked = True
-    risk_score = 95
-    threat_type = "Prompt Injection"
-
-  elif "credit card" in prompt_text or "password" in prompt_text or any(word in prompt_text for word in dlp_keywords):
-    is_blocked = True
-    risk_score = 80
-    threat_type = "DLP Violation"
-
-  save_log_to_db(request.prompt, is_blocked, risk_score, threat_type)
-
-  if is_blocked:
-    raise HTTPException(
-        status_code=403,
-        detail={
-            "error": "Request blocked by GenAI Security Gateway",
-            "threat": threat_type,
-        },
+    # log first, so blocked requests are recorded before the 403 is raised
+    save_log_to_db(
+        db,
+        request.prompt,
+        result.is_blocked,
+        result.risk_score,
+        result.threat_type,
     )
 
-  return {
-      "status": "Allowed",
-      "risk_score": risk_score,
-      "message": "Prompt passed security checks successfully",
-  }
+    if result.is_blocked:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Request blocked by GenAI Security Gateway",
+                "threat": result.threat_type,
+            },
+        )
+
+    return {
+        "status": "Allowed",
+        "risk_score": result.risk_score,
+        "message": "Prompt passed security checks successfully",
+    }
 
 
 #  Statistics endpoint for the dashboard
 @app.get("/stats")
-def get_stats():
-  db = SessionLocal()
-  try:
+def get_stats(db: Session = Depends(get_db)):
     total_requests = db.query(RequestLogDB).count()
     blocked_injections = (
         db.query(RequestLogDB)
@@ -127,27 +131,22 @@ def get_stats():
         .count()
     )
 
-
     return {
         "total_requests": total_requests,
         "blocked_injections": blocked_injections,
         "data_leaks_prevented": dlp_prevented,
         "status": "Active & Secure",
     }
-  finally:
-    db.close()
 
 
 #  History endpoint powering the dashboard's activity chart
 @app.get("/history")
-def get_history(hours: int = 24):
-  if hours < 1 or hours > 720:
-    raise HTTPException(
-        status_code=400, detail="hours must be between 1 and 720"
-    )
+def get_history(hours: int = 24, db: Session = Depends(get_db)):
+    if hours < 1 or hours > 720:
+        raise HTTPException(
+            status_code=400, detail="hours must be between 1 and 720"
+        )
 
-  db = SessionLocal()
-  try:
     # timestamps are written with datetime.utcnow(), so compare against UTC
     cutoff = datetime.utcnow() - timedelta(hours=hours)
 
@@ -160,42 +159,40 @@ def get_history(hours: int = 24):
 
     records = []
     for row in rows:
-      if row.timestamp is None:
-        continue
+        if row.timestamp is None:
+            continue
 
-      # The column is naive UTC. Without an explicit "Z" the browser would
-      # read the ISO string as local time and shift every chart bucket by
-      # the viewer's UTC offset.
-      stamp = row.timestamp.replace(tzinfo=timezone.utc)
+        # The column is naive UTC. Without an explicit "Z" the browser would
+        # read the ISO string as local time and shift every chart bucket by
+        # the viewer's UTC offset.
+        stamp = row.timestamp.replace(tzinfo=timezone.utc)
 
-      records.append({
-          "timestamp": stamp.isoformat().replace("+00:00", "Z"),
-          "blocked": bool(row.is_blocked),
-          "threat_type": row.threat_type,
-          "risk_score": row.risk_score,
-          "prompt": row.prompt,
-      })
+        records.append({
+            "timestamp": stamp.isoformat().replace("+00:00", "Z"),
+            "blocked": bool(row.is_blocked),
+            "threat_type": row.threat_type,
+            "risk_score": row.risk_score,
+            "prompt": row.prompt,
+        })
 
     return {"records": records}
-  finally:
-    db.close()
 
 
 @app.get("/export-excel")
-def export_logs_to_excel():
-  df = pd.read_sql("SELECT * FROM request_logs", con=engine)
+def export_logs_to_excel(db: Session = Depends(get_db)):
+    df = pd.read_sql("SELECT * FROM request_logs", con=db.connection())
 
-  # Build the workbook in memory; nothing is written to the filesystem
-  buffer = io.BytesIO()
-  df.to_excel(buffer, index=False)
-  buffer.seek(0)
+    # Build the workbook in memory; nothing is written to the filesystem
+    buffer = io.BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
 
-  return StreamingResponse(
-      buffer,
-      media_type=(
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      ),
-      headers={
-          "Content-Disposition": 'attachment; filename="security_audit_logs.xlsx"'
-      },
-  )
+    return StreamingResponse(
+        buffer,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": 'attachment; filename="security_audit_logs.xlsx"'
+        },
+    )

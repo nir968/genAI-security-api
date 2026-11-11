@@ -7,3 +7,4 @@ run.bat
 README.md
 .venv/
 venv/
+tests/
