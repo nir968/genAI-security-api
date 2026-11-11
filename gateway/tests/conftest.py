@@ -11,6 +11,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import main
+from dlp import engine as dlp_engine
+
+
+@pytest.fixture(autouse=True)
+def fresh_dlp_policy():
+    """Every test starts (and ends) with the default policy, unloaded."""
+    dlp_engine.reset_policy()
+    yield
+    dlp_engine.reset_policy()
 
 
 @pytest.fixture
