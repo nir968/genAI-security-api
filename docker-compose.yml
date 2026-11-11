@@ -1,7 +1,6 @@
 services:
   gateway:
     build: ./gateway
-    container_name: genai-api-container
     environment:
       # SQLite file lives on the named volume so data survives restarts
       DATABASE_URL: sqlite:////data/security_gateway.db
@@ -11,6 +10,13 @@ services:
       - "8000:8000"
     networks:
       - app-net
+    healthcheck:
+      # slim images have no curl, so use python's urllib
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   dashboard:
@@ -21,7 +27,8 @@ services:
     ports:
       - "5001:5001"
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
     networks:
       - app-net
     restart: unless-stopped

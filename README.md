@@ -29,6 +29,7 @@ flowchart LR
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| GET | `/health` | Liveness probe (`{"status": "ok"}`), used by the Docker healthcheck |
 | POST | `/inspect` | Inspect a prompt (`{"prompt": "..."}`); returns 403 if blocked |
 | GET | `/stats` | Totals for the dashboard |
 | GET | `/history?hours=24` | Request history for the activity chart |
@@ -55,14 +56,16 @@ curl -X POST http://localhost:8000/inspect -H "Content-Type: application/json" \
 | Variable | Service | Default | Set in compose to |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | gateway | `sqlite:///./security_gateway.db` | `sqlite:////data/security_gateway.db` |
-| `GATEWAY_URL` | dashboard | `http://genai-api-container:8000` | `http://gateway:8000` |
+| `GATEWAY_URL` | dashboard | `http://127.0.0.1:8000` | `http://gateway:8000` |
+| `FLASK_DEBUG` | dashboard | off (`0`) | not set (off) |
+
+Both containers run as a non-root user, and the dashboard is served by gunicorn (2 workers). The gateway container has a healthcheck on `/health`; the dashboard waits for it to be healthy.
 
 The database lives in the named volume `gateway-data`, so it survives `docker compose down`. To wipe it: `docker compose down -v`.
 
 ## Screenshot
 
-<!-- Replace with a real screenshot: save it as docs/dashboard.png -->
-![Dashboard screenshot](docs/dashboard.png)
+<!-- TODO: add a dashboard screenshot as docs/dashboard.png and embed it here with ![Dashboard screenshot](docs/dashboard.png) -->
 
 ## Local development (without Docker)
 
@@ -72,10 +75,10 @@ cd gateway && pip install -r requirements.txt && uvicorn main:app --reload
 
 # dashboard (in another terminal; point it at the local gateway)
 cd dashboard && pip install -r requirements.txt
-set GATEWAY_URL=http://127.0.0.1:8000   # PowerShell: $env:GATEWAY_URL="http://127.0.0.1:8000"
+# GATEWAY_URL already defaults to http://127.0.0.1:8000; set FLASK_DEBUG=1 for the reloader
 python app.py
 ```
 
 ## CI
 
-[`.github/workflows/main.yml`](.github/workflows/main.yml) installs both services' dependencies and compile-checks `gateway/` and `dashboard/` on every push to `main`/`master`.
+[`.github/workflows/main.yml`](.github/workflows/main.yml) compile-checks `gateway/` and `dashboard/` and validates and builds the Docker images, on every push to `main` and on pull requests.

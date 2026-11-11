@@ -1,11 +1,14 @@
 #backend
+import io
 import os
 from datetime import datetime, timedelta, timezone
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+
+import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 # 1. create a SQLite database connection and session
 SQLALCHEMY_DATABASE_URL = os.environ.get(
@@ -27,6 +30,8 @@ class RequestLogDB(Base):
   is_blocked = Column(Boolean, default=False)
   risk_score = Column(Integer, default=0)
   threat_type = Column(String, default="None")
+  # TODO: datetime.utcnow() is deprecated; switching to timezone-aware
+  # datetimes changes stored data, so it is deliberately left as is for now.
   timestamp = Column(DateTime, default=datetime.utcnow)
 
 
@@ -59,7 +64,13 @@ def save_log_to_db(
     db.close()
 
 
-# Endpoint for receiving prompts, inspection, and direct synchronous logging@app.post("/inspect")
+# Liveness probe (used by the Docker healthcheck); does not touch the database
+@app.get("/health")
+def health():
+  return {"status": "ok"}
+
+
+# Endpoint for receiving prompts, inspection, and direct synchronous logging
 @app.post("/inspect")
 def inspect_prompt(request: PromptRequest):
 
@@ -170,29 +181,21 @@ def get_history(hours: int = 24):
     db.close()
 
 
-#______________________________________________________________________________________
-
-import os
-from fastapi.responses import FileResponse
-import pandas as pd
-
-
 @app.get("/export-excel")
 def export_logs_to_excel():
+  df = pd.read_sql("SELECT * FROM request_logs", con=engine)
 
-    df = pd.read_sql("SELECT * FROM request_logs", con=engine)
+  # Build the workbook in memory; nothing is written to the filesystem
+  buffer = io.BytesIO()
+  df.to_excel(buffer, index=False)
+  buffer.seek(0)
 
-    # file name for the Excel file
-    file_path = "security_audit_logs.xlsx"
-
-    # save as Excel file
-    df.to_excel(file_path, index=False)
-
-    # return the Excel file as a response
-    return FileResponse(
-        path=file_path,
-        filename="security_audit_logs.xlsx",
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-    )
+  return StreamingResponse(
+      buffer,
+      media_type=(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ),
+      headers={
+          "Content-Disposition": 'attachment; filename="security_audit_logs.xlsx"'
+      },
+  )

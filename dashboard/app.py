@@ -1,13 +1,14 @@
 #frontend
 from flask import Flask, render_template, jsonify, request
 import os
+
 import requests
 
 app = Flask(__name__)
 
-# Container name from the deploy cheat sheet: `--name genai-api-container`.
-# Single source of truth so the routes below can't drift apart.
-FASTAPI_BASE = os.environ.get("GATEWAY_URL", "http://genai-api-container:8000")
+# Gateway base URL. docker-compose sets http://gateway:8000; the default is for
+# running locally without Docker. Single source of truth for all routes below.
+FASTAPI_BASE = os.environ.get("GATEWAY_URL", "http://127.0.0.1:8000")
 
 # Active endpoint for the backend API running within the Docker network
 FASTAPI_URL = FASTAPI_BASE + "/stats"
@@ -20,9 +21,10 @@ def dashboard():
     and falls back to an offline state if the service is unreachable.
     """
     try:
-        response = requests.get(FASTAPI_URL)
-        stats = response.json() 
-    except:
+        response = requests.get(FASTAPI_URL, timeout=5)
+        response.raise_for_status()
+        stats = response.json()
+    except (requests.RequestException, ValueError):
         # Fallback dictionary for degraded/offline state presentation
         stats = {
             "total_requests": "error",
@@ -39,8 +41,8 @@ def activity():
     """
     Relays the backend's request history to the browser.
 
-    The dashboard JS cannot call the gateway directly -- `genai-api-container`
-    only resolves inside the app-net Docker network, not from the user's
+    The dashboard JS cannot call the gateway directly -- the gateway
+    hostname only resolves inside the Docker network, not from the user's
     machine -- so this route proxies it same-origin. Errors are passed through
     as a non-200 so the chart shows its empty state instead of stale figures.
     """
@@ -58,4 +60,5 @@ def activity():
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0",port=5001, debug=True)
+    debug = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true", "yes")
+    app.run(host="0.0.0.0", port=5001, debug=debug)

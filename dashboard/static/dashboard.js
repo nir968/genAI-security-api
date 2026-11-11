@@ -200,8 +200,8 @@ function exportToExcel(rows) {
  * ------------------------------------------------------------------ */
 
 /* Same-origin: the browser cannot resolve the Docker-internal hostname the
- * server-side call uses, so this needs a Flask route that proxies the
- * gateway. No such route exists yet — the fetch 404s until one is added. */
+ * server-side call uses, so it goes through the Flask route
+ * /api/activity (dashboard/app.py), which proxies the gateway. */
 var ACTIVITY_ENDPOINT = '/api/activity';
 var BUCKET_MINUTES = 60;
 
