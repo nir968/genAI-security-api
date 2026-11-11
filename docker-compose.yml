@@ -1,0 +1,33 @@
+services:
+  gateway:
+    build: ./gateway
+    container_name: genai-api-container
+    environment:
+      # SQLite file lives on the named volume so data survives restarts
+      DATABASE_URL: sqlite:////data/security_gateway.db
+    volumes:
+      - gateway-data:/data
+    ports:
+      - "8000:8000"
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    environment:
+      # Resolved by Docker DNS via the service name
+      GATEWAY_URL: http://gateway:8000
+    ports:
+      - "5001:5001"
+    depends_on:
+      - gateway
+    networks:
+      - app-net
+    restart: unless-stopped
+
+networks:
+  app-net:
+
+volumes:
+  gateway-data:

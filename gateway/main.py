@@ -1,4 +1,5 @@
 #backend
+import os
 from datetime import datetime, timedelta, timezone
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -7,7 +8,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # 1. create a SQLite database connection and session
-SQLALCHEMY_DATABASE_URL = "sqlite:///./security_gateway.db"
+SQLALCHEMY_DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "sqlite:///./security_gateway.db"
+)
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
