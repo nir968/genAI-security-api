@@ -21,3 +21,9 @@ env/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Test and coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/

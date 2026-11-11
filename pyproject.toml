@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+testpaths = ["gateway/tests", "dashboard/tests"]
+pythonpath = ["gateway", "dashboard"]
+addopts = "--import-mode=importlib -ra"
+xfail_strict = true
