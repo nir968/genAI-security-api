@@ -1,11 +1,19 @@
 import type {
+  ApprovalDecision,
+  ApprovalStatus,
   ChatResponse,
   ChatResult,
+  DecisionRequest,
+  DecisionResult,
   HealthResponse,
   HistoryResponse,
   InspectBlockedDetail,
   InspectResponse,
   InspectResult,
+  McpApproval,
+  McpApprovalsResponse,
+  McpEventsResponse,
+  McpStats,
   StatsResponse,
 } from './types';
 
@@ -106,6 +114,37 @@ export async function sendChat(message: string): Promise<ChatResult> {
   }
   if (!raw.ok) throw failure(raw);
   return { kind: 'ok', data: raw.body as ChatResponse };
+}
+
+/** The most events one request asks for. The gateway allows up to 5000. */
+export const MCP_EVENT_LIMIT = 2000;
+
+export const getMcpEvents = (hours: number) =>
+  getJson<McpEventsResponse>(
+    `/mcp/events?hours=${encodeURIComponent(String(hours))}&limit=${MCP_EVENT_LIMIT}`,
+  );
+export const getMcpStats = () => getJson<McpStats>('/mcp/stats');
+
+/** Without a status: every approval, pending ones included. */
+export const getApprovals = (status?: ApprovalStatus) =>
+  getJson<McpApprovalsResponse>(
+    status === undefined ? '/mcp/approvals' : `/mcp/approvals?status=${encodeURIComponent(status)}`,
+  );
+
+function isApprovalStatus(value: unknown): value is ApprovalStatus {
+  return value === 'pending' || value === 'approved' || value === 'denied' || value === 'expired';
+}
+
+export async function decideApproval(id: string, decision: ApprovalDecision): Promise<DecisionResult> {
+  const payload: DecisionRequest = { decision };
+  const raw = await postJson(`/mcp/approvals/${encodeURIComponent(id)}/decision`, payload);
+  if (raw.status === 409) {
+    const detail = detailOf(raw.body);
+    const status = isRecord(detail) ? detail.status : undefined;
+    return { kind: 'conflict', status: isApprovalStatus(status) ? status : null };
+  }
+  if (!raw.ok) throw failure(raw);
+  return { kind: 'ok', approval: raw.body as McpApproval };
 }
 
 export const EXPORT_EXCEL_URL = `${API_BASE}/export-excel`;

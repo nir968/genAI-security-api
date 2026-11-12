@@ -103,3 +103,34 @@ describe('Overview', () => {
     expect(asked).toContain('1');
   });
 });
+
+async function agentSection(): Promise<HTMLElement> {
+  const heading = await screen.findByRole('heading', { name: 'Agent security' });
+  return heading.closest('section') as HTMLElement;
+}
+
+describe('Overview: agent security row', () => {
+  it('shows blocked calls, injections removed and pending approvals', async () => {
+    renderApp('/');
+    const section = await agentSection();
+    expect(await within(section).findByRole('link', { name: 'Blocked calls 6' })).toHaveAttribute('href', '/agents');
+    expect(within(section).getByRole('link', { name: 'Injections removed 3' })).toHaveAttribute('href', '/agents');
+    expect(within(section).getByRole('link', { name: 'Pending approvals 2' })).toHaveAttribute('href', '/approvals');
+    expect(within(section).getByRole('link', { name: 'Details' })).toHaveAttribute('href', '/agents');
+  });
+
+  it('shows dashes when /mcp/stats fails, and leaves the other cards alone', async () => {
+    server.use(http.get('/api/mcp/stats', () => HttpResponse.json({ detail: 'boom' }, { status: 500 })));
+    renderApp('/');
+    const section = await agentSection();
+    expect(await within(section).findByRole('link', { name: 'Blocked calls —' })).toBeInTheDocument();
+    expect(within(await screen.findByRole('group', { name: 'Total requests' })).getByText('1,234')).toBeInTheDocument();
+  });
+
+  it('navigates to the agent page and the approvals page', async () => {
+    const user = userEvent.setup();
+    renderApp('/');
+    await user.click(await screen.findByRole('link', { name: 'Pending approvals 2' }));
+    expect(await screen.findByRole('heading', { name: 'Approvals', level: 2 })).toBeInTheDocument();
+  });
+});

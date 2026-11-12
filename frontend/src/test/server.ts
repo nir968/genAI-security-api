@@ -1,7 +1,16 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 
-import { STATS, sampleHistory } from './fixtures';
+import {
+  MCP_STATS,
+  STATS,
+  makeApproval,
+  sampleDecided,
+  sampleHistory,
+  sampleMcpEvents,
+  samplePending,
+  secondsFromNow,
+} from './fixtures';
 
 const CARD = '4111 1111 1111 1111';
 const IBAN = 'IL620108000000099999999';
@@ -14,6 +23,34 @@ export const handlers = [
   http.get('/api/health', () => HttpResponse.json({ status: 'ok' })),
   http.get('/api/stats', () => HttpResponse.json(STATS)),
   http.get('/api/history', () => HttpResponse.json({ records: sampleHistory() })),
+
+  // agent security: same shapes as gateway/mcp_security.py
+  http.get('/api/mcp/events', () => HttpResponse.json({ events: sampleMcpEvents() })),
+  http.get('/api/mcp/stats', () => HttpResponse.json(MCP_STATS)),
+  http.get('/api/mcp/approvals', ({ request }) => {
+    const status = new URL(request.url).searchParams.get('status');
+    const all = [...samplePending(), ...sampleDecided()];
+    return HttpResponse.json({
+      approvals: status === null ? all : all.filter((approval) => approval.status === status),
+    });
+  }),
+  http.post('/api/mcp/approvals/:id/decision', async ({ params, request }) => {
+    const { decision } = (await request.json()) as { decision: 'approve' | 'deny' };
+    const id = String(params.id);
+    if (id === 'already-decided') {
+      return HttpResponse.json(
+        { detail: { error: 'Approval is not pending', status: 'approved' } },
+        { status: 409 },
+      );
+    }
+    return HttpResponse.json(
+      makeApproval({
+        id,
+        status: decision === 'approve' ? 'approved' : 'denied',
+        decided_at: secondsFromNow(0),
+      }),
+    );
+  }),
 
   http.post('/api/inspect', async ({ request }) => {
     const { prompt } = (await request.json()) as { prompt: string };

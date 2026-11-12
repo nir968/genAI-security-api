@@ -4,6 +4,8 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
 import { LiveProvider } from './api/live';
 import { Layout } from './components/Layout';
+import { Agents } from './pages/Agents';
+import { Approvals } from './pages/Approvals';
 import { Events } from './pages/Events';
 import { Playground } from './pages/Playground';
 
@@ -22,7 +24,9 @@ export function AppRoutes() {
       <Route element={<Layout />}>
         <Route index element={<Overview />} />
         <Route path="events" element={<Events />} />
-        <Route path="playground" element={<Playground />} />
+        <Route path="agents" element={<Agents />} />
+        <Route path="approvals" element={<Approvals />} />
+        <Route path="playground"element={<Playground />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
