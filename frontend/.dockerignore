@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+.vite
+npm-debug.log*
+Dockerfile
+.dockerignore
+
+# tests are not needed to build the image
+src/test
+src/**/*.test.ts
+src/**/*.test.tsx
+vitest.config.ts

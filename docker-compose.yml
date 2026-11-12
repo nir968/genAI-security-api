@@ -34,18 +34,23 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  dashboard:
-    build: ./dashboard
-    environment:
-      # Resolved by Docker DNS via the service name
-      GATEWAY_URL: http://gateway:8000
+  frontend:
+    # React SPA served by nginx (non-root, port 8080 inside the container).
+    # nginx also proxies /api/* to http://gateway:8000 (Docker DNS service name).
+    build: ./frontend
     ports:
-      - "5001:5001"
+      - "5001:8080"
     depends_on:
       gateway:
         condition: service_healthy
     networks:
       - app-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
 networks:

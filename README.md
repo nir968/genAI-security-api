@@ -6,17 +6,17 @@ A security layer that sits between your applications and a generative-AI model. 
 - **DLP engine** – finds credit cards, IBANs, Israeli IDs, secrets and more using *validated* detectors (checksums, context, entropy), and applies a policy file: allow, alert, redact or block. See [DLP engine](#dlp-engine).
 - **Chat proxy** – `/chat` scans the user's message, calls an LLM, and scans the model's answer too.
 - **Audit log** – every request is stored in SQLite and can be exported to Excel. Sensitive values are masked before they are stored.
-- **SOC-style dashboard** – a Flask web console showing live totals and an activity chart.
+- **SOC-style dashboard** – a React single-page app with live totals, an activity chart, a filterable event log and a playground. See [Frontend](#frontend).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     Client["Client / AI app"] -- "POST /inspect, /chat" --> Gateway
-    Browser["Browser"] -- ":5001" --> Dashboard
+    Browser["Browser"] -- ":5001" --> Nginx
 
     subgraph Docker network: app-net
-        Dashboard["dashboard<br/>Flask :5001"] -- "GET /stats, /history<br/>(GATEWAY_URL)" --> Gateway["gateway<br/>FastAPI :8000<br/>injection check + DLP engine"]
+        Nginx["frontend<br/>nginx :8080<br/>React SPA"] -- "/api/* (prefix stripped)" --> Gateway["gateway<br/>FastAPI :8000<br/>injection check + DLP engine"]
         Gateway --> DB[("SQLite<br/>volume: gateway-data → /data")]
     end
 
@@ -27,7 +27,8 @@ flowchart LR
 | Folder | Service | Stack |
 | --- | --- | --- |
 | [gateway/](gateway/) | Inspection API + audit log | FastAPI, SQLAlchemy, SQLite |
-| [dashboard/](dashboard/) | Monitoring UI | Flask, Jinja2, JS |
+| [frontend/](frontend/) | Monitoring UI + playground, served by nginx | React, TypeScript, Vite, Tailwind |
+| [scripts/](scripts/) | Demo data generator | Python (standard library) |
 
 ### Gateway endpoints
 
@@ -57,7 +58,7 @@ Response examples for `/inspect`:
 docker compose up --build
 ```
 
-- Dashboard: http://localhost:5001
+- Dashboard (React app): http://localhost:5001
 - Gateway API docs: http://localhost:8000/docs
 
 Try it:
@@ -72,8 +73,6 @@ curl -X POST http://localhost:8000/inspect -H "Content-Type: application/json" \
 | Variable | Service | Default | Set in compose to |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | gateway | `sqlite:///./security_gateway.db` | `sqlite:////data/security_gateway.db` |
-| `GATEWAY_URL` | dashboard | `http://127.0.0.1:8000` | `http://gateway:8000` |
-| `FLASK_DEBUG` | dashboard | off (`0`) | not set (off) |
 | `DLP_POLICY_PATH` | gateway | bundled `gateway/dlp/policy.yaml` | `/app/dlp/policy.yaml` |
 | `MAX_PROMPT_CHARS` | gateway | `20000` | `20000` |
 | `LLM_PROVIDER` | gateway | `mock` | `mock` |
@@ -81,7 +80,7 @@ curl -X POST http://localhost:8000/inspect -H "Content-Type: application/json" \
 | `LLM_MODEL` | gateway | – (required for `openai_compatible`) | empty |
 | `LLM_API_KEY` | gateway | none | empty |
 
-Both containers run as a non-root user, and the dashboard is served by gunicorn (2 workers). The gateway container has a healthcheck on `/health`; the dashboard waits for it to be healthy.
+Both containers run as a non-root user. The gateway container has a healthcheck on `/health`; the frontend container waits for it to be healthy. nginx forwards `/api/*` to `http://gateway:8000` (the compose service name), so the browser only ever talks to port 5001.
 
 The database lives in the named volume `gateway-data`, so it survives `docker compose down`. To wipe it: `docker compose down -v`.
 
@@ -149,22 +148,70 @@ docker compose up --build
 
 On Linux, add `extra_hosts: ["host.docker.internal:host-gateway"]` to the `gateway` service. The same three variables work for OpenAI (`https://api.openai.com/v1` plus `LLM_API_KEY`) and Groq or any other OpenAI-compatible server.
 
-## Screenshot
+## Frontend
+
+A single-page app in [`frontend/`](frontend/), built with Vite and served by nginx (`nginxinc/nginx-unprivileged`, non-root).
+
+- **Stack:** React 19, TypeScript (strict, no `any`), react-router, TanStack Query for all server data, Recharts, Tailwind CSS v4. Tests: Vitest, React Testing Library, MSW. Dependency versions are pinned exactly in `package.json`.
+- **Overview (`/`)** – stat cards, an activity chart (events per time bucket, stacked by action, with a 1h / 24h / 7d selector) and a bar chart of sensitive data by type. Every chart has a "View as table" fallback.
+- **Events (`/events`)** – the audit log as a table, newest first: filter by action, direction, data type, text and time range; 25 rows per page; click a prompt to expand it (masks highlighted); **Export CSV** (filtered rows, UTF-8 BOM) and **Download Excel** (the gateway's `/export-excel`).
+- **Playground (`/playground`)** – type or pick a sample prompt, then **Inspect** (`POST /inspect`) or **Send to chat** (`POST /chat`). Shows the action, risk score, data types and the redacted text with every mask highlighted. A 403 is shown as "Blocked", not as an error.
+- **Live / Paused** toggle in the header: stats, history and the gateway status refresh every 10 seconds while Live. An "API offline" banner appears when requests fail.
+
+### Local development
+
+Run the gateway, then the dev server (Node 20.19+ or 22):
+
+```bash
+# terminal 1: the gateway on :8000
+cd gateway && pip install -r requirements.txt && uvicorn main:app --reload
+
+# terminal 2: the frontend on http://localhost:5173
+cd frontend && npm ci && npm run dev
+```
+
+The dev server proxies `/api` to `http://127.0.0.1:8000` (stripping the prefix), so no CORS setup is needed.
+
+### Tests and checks
+
+```bash
+cd frontend
+npm run lint        # ESLint (typescript-eslint, react-hooks)
+npm run typecheck   # tsc --noEmit
+npm test            # Vitest, no real network (MSW)
+npx vitest run --coverage   # coverage, fails under 80% lines
+npm run build
+```
+
+### Demo data
+
+With the stack running, fill it with a realistic mix of requests (benign questions, cards, IBANs, emails, phone numbers, Israeli IDs, credentials, injections and a few `/chat` calls). Python standard library only:
+
+```bash
+python scripts/seed_demo.py                 # http://localhost:8000
+python scripts/seed_demo.py http://host:8000
+```
+
+It prints the number of requests per action and how the gateway's `/stats` counters changed.
+
+## Screenshots
 
 <!-- TODO: add a dashboard screenshot as docs/dashboard.png and embed it here with ![Dashboard screenshot](docs/dashboard.png) -->
 
-## Local development (without Docker)
+<!-- TODO: add a Playground screenshot as docs/playground.png and embed it here with ![Playground screenshot](docs/playground.png) -->
+
+## Local development (gateway only)
 
 ```bash
-# gateway
 cd gateway && pip install -r requirements.txt && uvicorn main:app --reload
-
-# dashboard (in another terminal; point it at the local gateway)
-cd dashboard && pip install -r requirements.txt
-# GATEWAY_URL already defaults to http://127.0.0.1:8000; set FLASK_DEBUG=1 for the reloader
-python app.py
 ```
+
+See [Frontend → Local development](#local-development) to run the UI against it.
 
 ## CI
 
-[`.github/workflows/main.yml`](.github/workflows/main.yml) runs the pytest suites for `gateway/` and `dashboard/` with a coverage gate (`--cov-fail-under=90`), and validates and builds the Docker images, on every push to `main` and on pull requests. Run the tests locally with `pip install -r requirements-dev.txt && pytest`.
+[`.github/workflows/main.yml`](.github/workflows/main.yml) runs on every push to `main` and on pull requests:
+
+- **Build & Check Code** – the pytest suite for `gateway/` with a coverage gate (`--cov-fail-under=90`). Locally: `pip install -r requirements-dev.txt && pytest`.
+- **Frontend** – `npm ci`, lint, type check, tests with coverage, and the production build, in `frontend/` on Node 22.
+- **Docker config & build** – validates `docker-compose.yml` and builds the gateway and frontend images.
