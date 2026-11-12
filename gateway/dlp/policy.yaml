@@ -1,0 +1,36 @@
+# DLP policy: what to do when each type of sensitive data is found.
+#
+# For every data type:
+#   action          allow | alert | redact | block
+#                     allow  - ignore the finding
+#                     alert  - let the text through, but report the data type
+#                     redact - replace the data with a mask and let the text through
+#                     block  - reject the request (HTTP 403)
+#   risk_score      0-100, reported when the finding triggers
+#   min_confidence  low | medium | high - findings below this confidence are
+#                   ignored for the type (e.g. an Israeli ID number without a
+#                   nearby "ID" keyword is only "low" confidence)
+#
+# The final action for a text is the most severe action among its findings
+# (block > redact > alert > allow); the risk score is the highest one.
+#
+# OUTPUT DIRECTION (model answers): the same rules apply, except that "block"
+# becomes "redact". We redact a model answer rather than fail the whole chat
+# turn, so the user still gets a useful reply with the sensitive part removed.
+#
+# Every known data type must appear here; to disable one, set action: allow.
+# Unknown types, unknown actions, unknown or missing fields stop the app at
+# startup. Set DLP_POLICY_PATH to use a different file.
+
+data_types:
+  CREDIT_CARD:           {action: block,  risk_score: 80, min_confidence: low}
+  IBAN:                  {action: redact, risk_score: 60, min_confidence: medium}
+  IL_ID:                 {action: redact, risk_score: 60, min_confidence: medium}
+  EMAIL:                 {action: alert,  risk_score: 30, min_confidence: medium}
+  PHONE_IL:              {action: alert,  risk_score: 30, min_confidence: medium}
+  AWS_ACCESS_KEY:        {action: block,  risk_score: 90, min_confidence: low}
+  GITHUB_TOKEN:          {action: block,  risk_score: 90, min_confidence: low}
+  PRIVATE_KEY:           {action: block,  risk_score: 90, min_confidence: low}
+  JWT:                   {action: block,  risk_score: 90, min_confidence: low}
+  CREDENTIAL_ASSIGNMENT: {action: block,  risk_score: 90, min_confidence: low}
+  HIGH_ENTROPY_SECRET:   {action: alert,  risk_score: 40, min_confidence: low}
