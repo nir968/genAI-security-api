@@ -161,7 +161,9 @@ A single-page app in [`frontend/`](frontend/), built with Vite and served by ngi
 - **Overview (`/`)** – stat cards, an activity chart (events per time bucket, stacked by action, with a 1h / 24h / 7d selector) and a bar chart of sensitive data by type. Every chart has a "View as table" fallback.
 - **Events (`/events`)** – the audit log as a table, newest first: filter by action, direction, data type, text and time range; 25 rows per page; click a prompt to expand it (masks highlighted); **Export CSV** (filtered rows, UTF-8 BOM) and **Download Excel** (the gateway's `/export-excel`).
 - **Playground (`/playground`)** – type or pick a sample prompt, then **Inspect** (`POST /inspect`) or **Send to chat** (`POST /chat`). Shows the action, risk score, data types and the redacted text with every mask highlighted. A 403 is shown as "Blocked", not as an error.
-- **Live / Paused** toggle in the header: stats, history and the gateway status refresh every 10 seconds while Live. An "API offline" banner appears when requests fail.
+- **Agents (`/agents`)** – the MCP security proxy's audit trail: stat cards (calls allowed and blocked, injections removed, results redacted, tool poisoning, approvals granted / denied / expired), an event table, newest first, with a colour and label per category (allowed, blocked, sanitized, tool poisoning, approval), filters (category, tool, text, 1h / 24h / 7d), 25 rows per page and expandable details, plus a collapsible "How the proxy protects agents" panel. See [Agent security (MCP)](#agent-security-mcp).
+- **Approvals (`/approvals`)** – sensitive tool calls waiting for a person. One card per pending approval with the tool, server, reason, a live countdown (red under 30 seconds, "Expired" at zero) and the masked arguments, pretty-printed; invisible characters such as `<U+200B>` are highlighted so you see what a screen would hide. **Approve** needs a second click on "Confirm send"; **Deny** is one click. A recent-decisions table sits below. The header shows an **Approvals** badge with the pending count on every page. See [Human approval in the dashboard](#human-approval-in-the-dashboard).
+- **Live / Paused** toggle in the header: stats, history, MCP events and the gateway status refresh every 10 seconds while Live. Pending approvals are polled every 3 seconds even when paused, because they expire. An "API offline" banner appears when requests fail.
 
 ### Local development
 
@@ -273,6 +275,47 @@ tools:
 
 The token is compared in constant time. Everything stored is masked: **raw tool arguments and results are never logged or stored**, and the gateway masks again whatever the proxy sends. Event details carry data-type names, counts and signal names only.
 
+### Human approval in the dashboard
+
+The human-in-the-loop flow, end to end:
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant P as MCP proxy
+    participant G as Gateway
+    participant D as Dashboard (/approvals)
+    actor H as Person
+
+    A->>P: tools/call send_email to bob@example.org
+    P->>P: allowlist, pin check, argument DLP pass
+    P->>G: POST /mcp/approvals (masked arguments + SHA-256 of the exact call)
+    G-->>P: id, expires_at
+    P->>G: poll GET /mcp/approvals/{id} every second
+    D->>G: GET /mcp/approvals?status=pending (every 3 s)
+    G-->>D: the pending approval
+    H->>D: reads the masked arguments, clicks Approve, then Confirm send
+    D->>G: POST /mcp/approvals/{id}/decision
+    G-->>D: status approved (409 if already decided or expired)
+    P->>G: poll sees "approved", hash matches
+    P->>A: runs the tool and returns the scanned result
+    Note over P,A: Deny, or no answer before expiry: the tool is never called and the agent gets an error
+```
+
+1. The agent calls a sensitive tool. The proxy creates an approval at the gateway and holds the call.
+2. The approval appears on **Approvals** within 3 seconds, and the header badge counts it.
+3. A person reads the reason and the masked arguments, then approves or denies. Approving is a deliberate two-step action; the buttons are disabled while the request is in flight and once the countdown reaches zero.
+4. The gateway records the decision with one conditional update, so two people cannot both win. A second decision, or one after expiry, gets a 409, which the dashboard shows as "This request was already decided or has expired".
+5. The proxy sees the new status. It runs the tool only if the approved record matches the call's arguments hash; deny, expiry and any mismatch refuse it.
+
+**Anyone who can reach the dashboard can approve.** There is no sign-in yet (see [Known limitations](#known-limitations)).
+
+### Hardening at the dashboard port
+
+The browser only needs four MCP calls: `GET /api/mcp/events`, `GET /api/mcp/stats`, `GET /api/mcp/approvals?status=…` and `POST /api/mcp/approvals/{id}/decision`. The endpoints that only the proxy uses are protected by `X-Proxy-Token` at the gateway, which stays the real control. As defense in depth, [`frontend/nginx.conf`](frontend/nginx.conf) also answers **404** for `/api/scan`, `POST /api/mcp/events`, `POST /api/mcp/approvals` and `GET /api/mcp/approvals/{id}`, and [`proxy-gateway.conf`](frontend/proxy-gateway.conf) removes any incoming `X-Proxy-Token` header so a browser can never forward one. The rules match the decoded, normalised path, so `%`-encoding, `//` and `/../` do not get around them.
+
+This protects port **5001** only. The compose file also publishes the gateway on port 8000, where the dashboard endpoints (including the approval decision) are open to anyone who can reach it: keep both ports on localhost or a private network.
+
 ### Run the demo
 
 You need Docker, and Python 3.10+ for the demo agent.
@@ -303,7 +346,7 @@ The agent (no LLM, just a script) runs scenarios A–H and prints a table:
 | G | email to an `example.org` address | waits for approval |
 | H | `--rug-pull`: the server redefines `send_email` | hidden and blocked (`TOOL_DEFINITION_CHANGED`) |
 
-Without `--auto-approve` the agent prints the approval id and the command to approve it:
+Without `--auto-approve` the agent waits at scenario G. Open the dashboard at http://localhost:5001/approvals and click **Approve** (then **Confirm send**) or **Deny**, or use the API with the approval id it prints:
 
 ```bash
 curl -X POST http://localhost:8000/mcp/approvals/<id>/decision \
@@ -359,7 +402,7 @@ To protect a different server, write a policy file for it (its tool names under 
 ### Known limitations
 
 - **Injection detection is heuristic.** It looks for known patterns (instructions aimed at an AI, hidden content, "send … to <address>"). A paraphrase it has no pattern for gets through, and innocent text can match (any HTML comment, an invisible character, "email it to …"). Treat it as one layer.
-- **The dashboard has no user authentication yet.** The read endpoints (`/mcp/events`, `/mcp/stats`, `/mcp/approvals`) and the approval **decision** endpoint are open to anyone who can reach the gateway, which means anyone who can reach it can approve a pending request. Keep the gateway on localhost or a private network until real authentication exists (see the TODO in `gateway/mcp_security.py`). The dashboard pages for MCP are a later step.
+- **The dashboard has no user authentication yet.** The read endpoints (`/mcp/events`, `/mcp/stats`, `/mcp/approvals`) and the approval **decision** endpoint are open to anyone who can reach the gateway, which means anyone who can reach it can approve a pending request. The **Approvals** page in the dashboard uses that same open endpoint, so anyone who can open the dashboard can approve a request. Keep the gateway (port 8000) and the dashboard (port 5001) on localhost or a private network until real authentication exists (see the TODO in `gateway/mcp_security.py`). nginx blocks the proxy-only endpoints on port 5001, but it does not authenticate anyone.
 - **Trust on first use trusts the first version it sees.** A tool that is poisoned in a way the heuristics miss on day one is pinned as good. Pinning catches *changes*, not a bad first version.
 - **Only tool calls are guarded.** The proxy exposes tools only (not resources, prompts or sampling), and it does not scan what an agent writes into arguments for injection, only for sensitive data.
 - **The approver sees masked arguments** (an email address shows as `b***@example.org`) and approves *this exact call*; the proxy cannot judge whether the call is a good idea.
@@ -368,9 +411,23 @@ To protect a different server, write a policy file for it (its tool names under 
 
 ## Screenshots
 
-<!-- TODO: add a dashboard screenshot as docs/dashboard.png and embed it here with ![Dashboard screenshot](docs/dashboard.png) -->
+Taken from the running stack with demo data (`scripts/seed_demo.py` and the demo agent).
 
-<!-- TODO: add a Playground screenshot as docs/playground.png and embed it here with ![Playground screenshot](docs/playground.png) -->
+![Overview: stat cards, the agent security row, activity and sensitive data by type](docs/screenshots/overview.png)
+
+*Overview: gateway totals, the new "Agent security" row (blocked calls, injections removed, pending approvals) and the activity chart.*
+
+![Playground: an IBAN is redacted before it would reach the model](docs/screenshots/playground.png)
+
+*Playground: the IBAN sample after **Inspect**. The gateway masks it as `[REDACTED:IBAN]` and reports risk score 60.*
+
+![Agents: proxy statistics and the event table with an expanded row](docs/screenshots/agents.png)
+
+*Agents: what the MCP security proxy did. Each event has a category colour and label; a row is expanded to show its details.*
+
+![Approvals: a pending send_email request with a countdown and masked arguments](docs/screenshots/approvals.png)
+
+*Approvals: a real pending request from the demo agent, waiting for a person. The recipient is masked, and the header badge shows the pending count.*
 
 ## Local development (gateway only)
 
