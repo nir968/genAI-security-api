@@ -47,7 +47,7 @@ export function filterRecords(
 }
 
 /** A copy sorted by time, newest first (ties keep their original order). */
-export function sortNewestFirst(records: readonly HistoryRecord[]): HistoryRecord[] {
+export function sortNewestFirst<T extends { timestamp: string }>(records: readonly T[]): T[] {
   return records
     .map((record, index) => ({ record, index, time: Date.parse(record.timestamp) }))
     .sort((a, b) => {

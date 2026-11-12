@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { splitRich } from '../lib/invisible';
 import { splitMasks } from '../lib/masks';
 import { humanizeDataType } from '../lib/format';
 import { TIME_RANGES, type TimeRange } from '../lib/buckets';
@@ -42,6 +43,38 @@ export function HighlightedMasks({ text }: { text: string }) {
     <>
       {splitMasks(text).map((segment, index) =>
         segment.masked ? (
+          <mark
+            key={index}
+            className="rounded bg-redact/25 px-1 font-mono text-[0.92em] text-sky-200 ring-1 ring-inset ring-redact/50"
+          >
+            {segment.text}
+          </mark>
+        ) : (
+          <span key={index}>{segment.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * Like HighlightedMasks, and invisible-character markers such as <U+200B> are
+ * shown in amber, so a human sees what a screen would hide.
+ */
+export function HighlightedRich({ text }: { text: string }) {
+  return (
+    <>
+      {splitRich(text).map((segment, index) =>
+        segment.kind === 'hidden' ? (
+          <mark
+            key={index}
+            title="Invisible character"
+            data-hidden-char=""
+            className="rounded bg-alert/30 px-1 font-mono text-[0.92em] font-semibold text-amber-200 ring-1 ring-inset ring-alert/70"
+          >
+            {segment.text}
+          </mark>
+        ) : segment.kind === 'masked' ? (
           <mark
             key={index}
             className="rounded bg-redact/25 px-1 font-mono text-[0.92em] text-sky-200 ring-1 ring-inset ring-redact/50"

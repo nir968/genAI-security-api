@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
+import { makeApproval } from '../test/fixtures';
 import { server } from '../test/server';
 import { renderApp } from '../test/utils';
 
@@ -79,6 +80,67 @@ describe('Layout', () => {
       await user.click(screen.getByRole('switch', { name: 'Live' }));
       await act(() => vi.advanceTimersByTimeAsync(60_000));
       expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('has Agents and Approvals in the navigation', () => {
+    renderApp('/playground');
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(nav).toHaveTextContent('Agents');
+    expect(nav).toHaveTextContent('Approvals');
+  });
+
+  it('shows the pending count next to Approvals on every page', async () => {
+    for (const path of ['/', '/events', '/playground']) {
+      const { unmount } = renderApp(path);
+      expect(await screen.findByLabelText('2 pending approvals')).toHaveTextContent('2');
+      expect(screen.getByRole('link', { name: /Approvals/ })).toContainElement(screen.getByLabelText('2 pending approvals'));
+      unmount();
+    }
+  });
+
+  it('uses the singular for one pending approval', async () => {
+    server.use(http.get('/api/mcp/approvals', () => HttpResponse.json({ approvals: [makeApproval()] })));
+    renderApp('/events');
+    expect(await screen.findByLabelText('1 pending approval')).toBeInTheDocument();
+  });
+
+  it('hides the badge at zero', async () => {
+    server.use(http.get('/api/mcp/approvals', () => HttpResponse.json({ approvals: [] })));
+    renderApp('/events');
+    await screen.findByText('Online');
+    expect(screen.queryByLabelText(/pending approval/)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Approvals' })).toBeInTheDocument();
+  });
+
+  it('shows 99+ for a very long queue but keeps the real number in the label', async () => {
+    const many = Array.from({ length: 120 }, (_, i) => makeApproval({ id: `id-${i}` }));
+    server.use(http.get('/api/mcp/approvals', () => HttpResponse.json({ approvals: many })));
+    renderApp('/events');
+    const badge = await screen.findByLabelText('120 pending approvals');
+    expect(badge).toHaveTextContent('99+');
+  });
+
+  it('keeps counting while Live is paused, because approvals expire', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      let count = 1;
+      server.use(
+        http.get('/api/mcp/approvals', () =>
+          HttpResponse.json({ approvals: Array.from({ length: count }, (_, i) => makeApproval({ id: `p${i}` })) }),
+        ),
+      );
+      renderApp('/playground');
+      expect(await screen.findByLabelText('1 pending approval')).toBeInTheDocument();
+      // pause Live: the 10 s refreshes stop, the 3 s approvals poll does not
+      act(() => screen.getByRole('switch', { name: 'Live' }).click());
+      count = 3;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3500);
+      });
+      expect(await screen.findByLabelText('3 pending approvals')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react';
 
-import { useHistory, useStats } from '../api/hooks';
+import { Link } from 'react-router';
+
+import { useHistory, useMcpStats, useStats } from '../api/hooks';
 import type { StatsResponse } from '../api/types';
 import { ActivityChart, DataTypeChart } from '../components/Charts';
 import { EmptyState, ErrorNotice, RangeSelector, Skeleton } from '../components/ui';
 import { bucketActivity, RANGE_HOURS, type TimeRange } from '../lib/buckets';
 import { countDataTypes } from '../lib/dataTypes';
+import { agentTotals } from '../lib/mcpEvents';
 
 const CARDS: { key: keyof Omit<StatsResponse, 'status'>; label: string; accent: string }[] = [
   { key: 'total_requests', label: 'Total requests', accent: 'text-ink' },
@@ -39,6 +42,48 @@ function StatCards() {
   );
 }
 
+/** Three small cards about the MCP proxy; each one links to the page with the details. */
+function AgentSummary() {
+  const stats = useMcpStats();
+  const totals = stats.data ? agentTotals(stats.data) : null;
+  const cards = [
+    { to: '/agents', label: 'Blocked calls', value: totals?.blocked, accent: 'text-red-300' },
+    { to: '/agents', label: 'Injections removed', value: totals?.injectionsRemoved, accent: 'text-sky-300' },
+    { to: '/approvals', label: 'Pending approvals', value: totals?.pending, accent: 'text-violet-300' },
+  ];
+  return (
+    <section aria-label="Agent security" className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-semibold text-ink">
+          Agent security
+        </h3>
+        <Link to="/agents" className="text-sm text-sky-300 underline">
+          Details
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {cards.map((card) => (
+          <Link key={card.label} to={card.to} className="panel block p-3 hover:border-ink-mute">
+            <span className="text-sm text-ink-dim">{card.label}</span>
+            {' '}
+            {card.value !== undefined ? (
+              <span className={`mt-0.5 block text-2xl font-semibold tabular-nums ${card.accent}`}>
+                {card.value.toLocaleString('en-US')}
+              </span>
+            ) : stats.isError ? (
+              <span className="mt-0.5 block text-2xl font-semibold text-ink-mute" title="Unavailable">
+                —
+              </span>
+            ) : (
+              <Skeleton className="mt-1.5 h-7 w-12" />
+            )}
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function Overview() {
   const [range, setRange] = useState<TimeRange>('24h');
   const history = useHistory(RANGE_HOURS[range]);
@@ -56,6 +101,7 @@ export function Overview() {
     <div className="space-y-6">
       <h2 className="sr-only">Overview</h2>
       <StatCards />
+      <AgentSummary />
 
       <section className="panel p-4" aria-labelledby="activity-title">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

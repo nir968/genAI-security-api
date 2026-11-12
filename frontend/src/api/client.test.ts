@@ -1,11 +1,16 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { samplePending } from '../test/fixtures';
 import { server } from '../test/server';
 import {
   ApiError,
+  decideApproval,
+  getApprovals,
   getHealth,
   getHistory,
+  getMcpEvents,
+  getMcpStats,
   getStats,
   inspectPrompt,
   isBlockedDetail,
@@ -145,5 +150,94 @@ describe('isBlockedDetail', () => {
     [['a'], false],
   ])('%j -> %s', (value, expected) => {
     expect(isBlockedDetail(value)).toBe(expected);
+  });
+});
+
+describe('agent security GET helpers', () => {
+  it('getMcpEvents sends hours and limit', async () => {
+    let seen = '';
+    server.use(
+      http.get('/api/mcp/events', ({ request }) => {
+        seen = new URL(request.url).search;
+        return HttpResponse.json({ events: [] });
+      }),
+    );
+    expect(await getMcpEvents(24)).toEqual({ events: [] });
+    expect(seen).toBe('?hours=24&limit=2000');
+  });
+
+  it('getMcpStats returns the counters', async () => {
+    const stats = await getMcpStats();
+    expect(stats.pending_approvals).toBe(2);
+    expect(stats.by_event_type.TOOL_CALL_ALLOWED).toBe(15);
+  });
+
+  it('getApprovals filters by status, or asks for all', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get('/api/mcp/approvals', ({ request }) => {
+        seen.push(new URL(request.url).search);
+        return HttpResponse.json({ approvals: [] });
+      }),
+    );
+    await getApprovals('pending');
+    await getApprovals();
+    expect(seen).toEqual(['?status=pending', '']);
+  });
+
+  it('throws an ApiError for a bad request', async () => {
+    server.use(http.get('/api/mcp/events', () => HttpResponse.json({ detail: 'hours must be between 1 and 720' }, { status: 400 })));
+    const error = await caught(getMcpEvents(0));
+    expect(error.status).toBe(400);
+  });
+});
+
+describe('decideApproval', () => {
+  it('posts the decision and returns the updated approval', async () => {
+    let body: unknown = null;
+    server.use(
+      http.post('/api/mcp/approvals/:id/decision', async ({ request, params }) => {
+        body = await request.json();
+        return HttpResponse.json({ ...samplePending()[0], id: params.id, status: 'approved' });
+      }),
+    );
+    const result = await decideApproval('abc', 'approve');
+    expect(body).toEqual({ decision: 'approve' });
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.approval.status).toBe('approved');
+  });
+
+  it('encodes the id in the path', async () => {
+    let path = '';
+    server.use(
+      http.post('/api/mcp/approvals/:id/decision', ({ request }) => {
+        path = new URL(request.url).pathname;
+        return HttpResponse.json(samplePending()[0]);
+      }),
+    );
+    await decideApproval('a/b c', 'deny');
+    expect(path).toBe('/api/mcp/approvals/a%2Fb%20c/decision');
+  });
+
+  it('returns a typed conflict for a 409, with the status the gateway reports', async () => {
+    expect(await decideApproval('already-decided', 'approve')).toEqual({ kind: 'conflict', status: 'approved' });
+  });
+
+  it('returns a conflict without a status when the gateway sends none', async () => {
+    server.use(http.post('/api/mcp/approvals/:id/decision', () => HttpResponse.json('nope', { status: 409 })));
+    expect(await decideApproval('x', 'deny')).toEqual({ kind: 'conflict', status: null });
+    server.use(
+      http.post('/api/mcp/approvals/:id/decision', () =>
+        HttpResponse.json({ detail: { error: 'x', status: 'weird' } }, { status: 409 }),
+      ),
+    );
+    expect(await decideApproval('x', 'deny')).toEqual({ kind: 'conflict', status: null });
+  });
+
+  it('throws for a 404 and for a 500', async () => {
+    server.use(http.post('/api/mcp/approvals/:id/decision', () => HttpResponse.json({ detail: { error: 'Approval not found' } }, { status: 404 })));
+    expect((await caught(decideApproval('x', 'approve'))).status).toBe(404);
+    server.use(http.post('/api/mcp/approvals/:id/decision', () => HttpResponse.json({ detail: 'boom' }, { status: 500 })));
+    expect((await caught(decideApproval('x', 'approve'))).status).toBe(500);
   });
 });

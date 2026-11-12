@@ -1,14 +1,32 @@
 import { Suspense } from 'react';
 import { NavLink, Outlet } from 'react-router';
 
-import { useHealth, useStats } from '../api/hooks';
+import { useHealth, usePendingApprovals, useStats } from '../api/hooks';
 import { useLive } from '../api/live';
 
 const NAV = [
   { to: '/', label: 'Overview', end: true },
   { to: '/events', label: 'Events', end: false },
+  { to: '/agents', label: 'Agents', end: false },
+  { to: '/approvals', label: 'Approvals', end: false },
   { to: '/playground', label: 'Playground', end: false },
 ];
+
+/** How many approvals are waiting for a person. Hidden at zero. */
+function PendingBadge() {
+  const pending = usePendingApprovals();
+  const count = pending.data?.approvals.length ?? 0;
+  if (count === 0) return null;
+  return (
+    <span
+      role="img"
+      aria-label={`${count} pending approval${count === 1 ? '' : 's'}`}
+      className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-400 px-1.5 text-xs font-bold text-page"
+    >
+      <span aria-hidden="true">{count > 99 ? '99+' : count}</span>
+    </span>
+  );
+}
 
 function GatewayStatus() {
   const health = useHealth();
@@ -87,6 +105,7 @@ export function Layout() {
                 }
               >
                 {item.label}
+                {item.to === '/approvals' ? <PendingBadge /> : null}
               </NavLink>
             ))}
           </nav>
