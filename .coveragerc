@@ -1,3 +1,5 @@
 [run]
 omit =
     */tests/*
+    # two-line entry points: `python -m ...` runs them in a separate process
+    */__main__.py

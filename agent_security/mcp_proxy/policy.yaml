@@ -1,0 +1,32 @@
+# Default policy of the MCP security proxy, for the demo "corp-docs" server.
+# Validated at startup: an unknown key or value stops the proxy.
+#
+# Any tool NOT listed under `tools` is denied: the agent does not see it and
+# cannot call it.
+
+server: corp-docs
+
+# send_email recipients inside these domains (and their subdomains) are
+# "internal": no approval needed. Everything else is external.
+allowed_email_domains:
+  - corp.example
+
+# how long a human has to answer an approval request before it counts as denied
+approval_timeout_seconds: 120
+
+tools:
+  list_documents:
+    allowed: true
+    scan_args: false
+    scan_results: true
+
+  read_document:
+    allowed: true
+    scan_args: false
+    scan_results: true          # redact sensitive data, remove injected instructions
+
+  send_email:
+    allowed: true
+    scan_args: true             # block / refuse calls whose arguments hold sensitive data
+    scan_results: false
+    requires_approval: external_recipient   # never | always | external_recipient

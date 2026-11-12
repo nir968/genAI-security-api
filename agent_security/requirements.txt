@@ -1,0 +1,4 @@
+# Dependencies of the MCP demo server, security proxy and demo agent
+mcp==2.3.0
+pyyaml==6.0.3
+httpx==0.28.1
