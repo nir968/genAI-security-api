@@ -22,6 +22,12 @@ env/
 .DS_Store
 Thumbs.db
 
+# Frontend
+node_modules/
+frontend/dist/
+frontend/coverage/
+*.tsbuildinfo
+
 # Test and coverage artifacts
 .coverage
 .coverage.*
