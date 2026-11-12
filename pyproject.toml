@@ -1,5 +1,7 @@
 [tool.pytest.ini_options]
-testpaths = ["gateway/tests"]
-pythonpath = ["gateway"]
+testpaths = ["gateway/tests", "agent_security/tests"]
+# gateway/ and agent_security/ are source roots: `import main`, `import mcp_proxy`, ...
+# (agent_security has no top-level package named "mcp": that would shadow the MCP SDK)
+pythonpath = ["gateway", "agent_security"]
 addopts = "--import-mode=importlib -ra"
 xfail_strict = true

@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests with coverage
-        run: pytest --cov=gateway --cov-report=term-missing --cov-fail-under=90
+        run: pytest --cov=gateway --cov=agent_security --cov-report=term-missing --cov-fail-under=90
 
   frontend:
     name: Frontend (lint, types, tests, build)

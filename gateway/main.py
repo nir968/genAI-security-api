@@ -10,11 +10,13 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, create_engine, or_
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
+from db_base import Base
 from detection import DLP_THREAT_TYPES, DetectionResult, analyze_prompt
 from dlp import engine as dlp_engine
 from llm import LLMProvider, build_provider_from_env
+from mcp_security import create_mcp_router
 from migrations import migrate_schema
 
 logger = logging.getLogger("gateway")
@@ -27,7 +29,6 @@ engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
 # longest prompt / chat message accepted, in characters
 MAX_PROMPT_CHARS = int(os.environ.get("MAX_PROMPT_CHARS", "20000"))
@@ -73,6 +74,10 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# /scan, /mcp/events, /mcp/stats, /mcp/approvals: the MCP security proxy API
+app.include_router(create_mcp_router(get_db))
 
 
 def get_llm_provider(request: Request) -> LLMProvider:

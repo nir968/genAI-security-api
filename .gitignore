@@ -33,3 +33,7 @@ frontend/coverage/
 .coverage.*
 htmlcov/
 .pytest_cache/
+
+# MCP demo: outbox written by the demo server, proxy pin store
+agent_security/demo_server/outbox.jsonl
+agent_security/mcp_proxy/state/

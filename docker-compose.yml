@@ -19,6 +19,10 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      # Shared secret with the MCP security proxy (agent_security/). Set it in the
+      # root .env file (see .env.example). While it is empty, /scan and the other
+      # proxy endpoints answer 503 (fail closed).
+      MCP_PROXY_TOKEN: ${MCP_PROXY_TOKEN:-}
     volumes:
       - gateway-data:/data
     ports:
