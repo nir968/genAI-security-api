@@ -160,6 +160,15 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self._send(200, {"status": "ok"})
+        # the dashboard-facing endpoints need no token (as on the real gateway)
+        if self.path.split("?")[0] == "/mcp/approvals":
+            pending = [a for a in self.server_state.approvals.values() if a["status"] == "pending"]
+            return self._send(200, {"approvals": pending})
+        if self.path == "/mcp/stats":
+            counts = {}
+            for event in self.server_state.events:
+                counts[event["event_type"]] = counts.get(event["event_type"], 0) + 1
+            return self._send(200, {"total_events": len(self.server_state.events), "by_event_type": counts})
         if not self._authorized():
             return None
         if self.path.startswith("/mcp/approvals/"):
@@ -168,6 +177,13 @@ class _Handler(BaseHTTPRequestHandler):
         return self._send(404, {})
 
     def do_POST(self):
+        parts = self.path.strip("/").split("/")
+        if len(parts) == 4 and parts[:2] == ["mcp", "approvals"] and parts[3] == "decision":
+            record = self.server_state.approvals.get(parts[2])  # dashboard endpoint: no token
+            if record is None or record["status"] != "pending":
+                return self._send(409, {})
+            record["status"] = "approved" if self._body()["decision"] == "approve" else "denied"
+            return self._send(200, record)
         if not self._authorized():
             return None
         body = self._body()
